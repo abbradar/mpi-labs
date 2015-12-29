@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
   for (int time = 0; time < TIMES; time++) {
     if (pid % 2 == 0) {
       int server = pid + 1;
-      
+
       int msg[INTS_SIZE];
       for (int i = 0; i < INTS_SIZE; i++) {
         msg[i] = rand();

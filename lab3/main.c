@@ -5,7 +5,6 @@
 #include <mpi.h>
 #include "utils.h"
 
-#define TIMES 10
 #define INTS_SIZE 16
 
 int main(int argc, char** argv) {
@@ -15,51 +14,63 @@ int main(int argc, char** argv) {
 
   int nprocs;
   mpi_check(MPI_Comm_size(MPI_COMM_WORLD, &nprocs));
-  err_check(nprocs % 2 == 0, "Needs mean number of workers");
   int pid;
   mpi_check(MPI_Comm_rank(MPI_COMM_WORLD, &pid));
 
-  // Stupid but should work if clocks are synchronized more or less.
-  // We wouldn't want a cluster with two seconds drift, right?
-  srand(time(NULL) + pid * 2);
+  int* recvcounts = calloc(nprocs, sizeof(int));
+  err_check(recvcounts != NULL, "Couldn't allocate buffer");
+  int* displs;
+  if (pid == 0) {
+    displs = calloc(nprocs, sizeof(int));
+    err_check(displs != NULL, "Couldn't allocate buffer");
+  }
+  
+  mpi_check(UMPI_Scatterv_lens(INTS_SIZE, recvcounts, displs, 0, MPI_COMM_WORLD));
+  
+  int recvlen = recvcounts[pid];
+  int* recvbuf = calloc(recvlen, sizeof(int));
+  err_check(recvbuf != NULL, "Couldn't allocate buffer");
 
-  for (int time = 0; time < TIMES; time++) {
-    if (pid % 2 == 0) {
-      int server = pid + 1;
-      
-      int msg[INTS_SIZE];
-      for (int i = 0; i < INTS_SIZE; i++) {
-        msg[i] = rand();
-      }
+  if (pid == 0) {
+    srand(time(NULL));
 
-      mpi_check(MPI_Send(msg, INTS_SIZE, MPI_INT, server, 0, MPI_COMM_WORLD));
-
-      int msgback[INTS_SIZE];
-      mpi_check(MPI_Recv(msgback, INTS_SIZE, MPI_INT, server, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE));
-      err_check(memcmp(msg, msgback, INTS_SIZE * sizeof(int)) == 0, "Ping message is corrupted");
-
-      int sum = 0;
-      for (int i = 0; i < INTS_SIZE; i++) {
-        sum += msgback[i];
-      }
-      printf("Rank: %d, got valid pong from %i, checksum %i\n", pid, server, sum);
-    } else {
-      MPI_Status status;
-      mpi_check(MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status));
-
-      int len;
-      mpi_check(MPI_Get_count(&status, MPI_INT, &len));
-      err_check(len != MPI_UNDEFINED, "Undefined message length");
-
-      int* buf = calloc(len, sizeof(int));
-      err_check(buf != NULL, "Couldn't allocate buffer");
-
-      mpi_check(MPI_Recv(buf, len, MPI_INT, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE));
-      printf("Rank: %d, got ping from %i, sending back\n", pid, status.MPI_SOURCE);
-      mpi_check(MPI_Send(buf, len, MPI_INT, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD));
-      
-      free(buf);
+    int msg[INTS_SIZE];
+    for (int i = 0; i < INTS_SIZE; i++) {
+      msg[i] = rand();
     }
+
+    printf("Sending source message: ");
+    for (int i = 0; i < INTS_SIZE; i++) {
+      printf("%i ", msg[i]);
+    }
+    printf("\n");
+
+    mpi_check(MPI_Scatterv(msg, recvcounts, displs, MPI_INT, recvbuf, recvlen, MPI_INT, 0, MPI_COMM_WORLD));
+  } else {
+    mpi_check(MPI_Scatterv(NULL, NULL, NULL, MPI_DATATYPE_NULL, recvbuf, recvlen, MPI_INT, 0, MPI_COMM_WORLD));
+  }
+
+  printf("Node %i got chunk of size %i: ", pid, recvlen);
+  for (int i = 0; i < recvlen; i++) {
+    printf("%i ", recvbuf[i]);
+  }
+  printf("\n");
+
+  for (int i = 0; i < recvlen; i++) {
+    recvbuf[i] += 1;
+  }
+
+  if (pid != 0) {
+    mpi_check(MPI_Gatherv(recvbuf, recvlen, MPI_INT, NULL, NULL, NULL, MPI_DATATYPE_NULL, 0, MPI_COMM_WORLD));
+  } else {
+    int msg[INTS_SIZE];
+    mpi_check(MPI_Gatherv(recvbuf, recvlen, MPI_INT, msg, recvcounts, displs, MPI_INT, 0, MPI_COMM_WORLD));
+
+    printf("Result: ");
+    for (int i = 0; i < INTS_SIZE; i++) {
+      printf("%i ", msg[i]);
+    }
+    printf("\n");
   }
 
   mpi_check(MPI_Finalize());

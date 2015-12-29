@@ -26,14 +26,18 @@ int main(int argc, char** argv) {
       mpi_check(MPI_Send(buf, len + 1, MPI_CHAR, i, 0, MPI_COMM_WORLD));
     }
   } else {
-    MPI_Status status;
-    mpi_check(MPI_Probe(0, 0, MPI_COMM_WORLD, &status));
-
+    char* buff;
     int len;
-    mpi_check(MPI_Get_count(&status, MPI_CHAR, &len));
-    err_check(len != MPI_UNDEFINED, "Undefined message length");
 
-    char* buf = calloc(len, sizeof(char));
+    {
+      MPI_Status status;
+      mpi_check(MPI_Probe(0, 0, MPI_COMM_WORLD, &status));
+
+      mpi_check(MPI_Get_count(&status, MPI_CHAR, &len));
+      err_check(len != MPI_UNDEFINED, "Undefined message length");
+    }
+
+    buf = calloc(len, sizeof(char));
     err_check(buf != NULL, "Couldn't allocate buffer");
 
     mpi_check(MPI_Recv(buf, len, MPI_CHAR, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE));
