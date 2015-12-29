@@ -4,7 +4,7 @@ rootdir := $(shell pwd)
 
 .PHONY: clean
 
-define goal_template =
+define goal_template
 $(eval include $(1)/build.mk)
 $(1)/$(1): $(foreach obj,$($(1)_objs),$(1)/$(obj)) $(common_objs)
 	mpicc $$^ -o $$@

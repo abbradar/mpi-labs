@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
       mpi_check(MPI_Send(buf, len + 1, MPI_CHAR, i, 0, MPI_COMM_WORLD));
     }
   } else {
-    char* buff;
+    char* buf;
     int len;
 
     {
