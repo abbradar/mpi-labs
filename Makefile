@@ -9,7 +9,8 @@ nodes ?= 8
 
 define goal_template
 $(eval include $(1)/build.mk)
-$(1)_nodes ?= $(nodes)
+# FIXME: maybe this can be done better?
+$(eval $(1)_nodes ?= $(nodes))
 
 $(1)/$(1): $(foreach obj,$($(1)_objs),$(1)/$(obj)) $(common_objs)
 	mpicc $$^ -o $$@
@@ -37,7 +38,7 @@ $(foreach lab, $(labs), \
 
 clean:
 	find -name \*.o -delete
-	rm -rf $(foreach lab,$(labs),$(lab)/$(lab) $(lab)/lab.job)
+	rm -rf $(foreach lab,$(labs),$(lab)/$(lab) $(lab)/$(lab).job)
 
 cleaninstall:
 	rm -rf $(foreach lab,$(labs),$(installdir)/$(lab) $(installdir)/$(lab).*.{stdout,stderr})
