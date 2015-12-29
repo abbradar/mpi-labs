@@ -1,0 +1,17 @@
+#!/usr/bin/env sh
+
+# IBM Load Leveler job control file
+
+# @ job_name = @job_name@
+# @ job_type = MPICH
+# @ node = 8
+# @ initialdir = @initialdir@
+# @ output = $(initialdir)/$(job_name).$(jobid).stdout
+# @ error = $(initialdir)/$(job_name).$(jobid).stderr
+# @ queue
+
+mpdboot -r ssh -n $LOADL_TOTAL_TASKS -f $LOADL_HOSTFILE
+
+mpirun -r ssh -machinefile $LOADL_HOSTFILE -n $LOADL_TOTAL_TASKS $LOADL_JOB_NAME
+
+mpdallexit

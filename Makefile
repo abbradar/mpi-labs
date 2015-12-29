@@ -1,13 +1,25 @@
 labs := lab1 lab2 lab3 lab4
 common_objs := utils.o
-rootdir := $(shell pwd)
 
-.PHONY: clean
+rootdir ?= $(shell pwd)
+installdir ?= /gpfs/home/iu7/$(shell whoami)/
+
+.PHONY: clean cleaninstall $(foreach lab,$(labs),$(lab).run)
 
 define goal_template
 $(eval include $(1)/build.mk)
+
 $(1)/$(1): $(foreach obj,$($(1)_objs),$(1)/$(obj)) $(common_objs)
 	mpicc $$^ -o $$@
+
+# Sets installdir in the job file, among other things
+$(1)/lab.job: lab.job.in
+	sed -e 's,@job_name@,$(1),g' -e 's,@initialdir@,$(installdir),' $$< > $$@
+
+# Copy executable to installdir and run the job
+$(1).run: $(1)/$(1) $(1)/lab.job
+	install -m755 $(1)/$(1) $(installdir)/$(1)
+	llsubmit $(1)/lab.job
 endef
 
 $(foreach lab, $(labs), \
@@ -19,4 +31,7 @@ $(foreach lab, $(labs), \
 
 clean:
 	find -name \*.o -delete
-	rm -rf $(foreach lab,$(labs),$(lab)/$(lab))
+	rm -rf $(foreach lab,$(labs),$(lab)/$(lab) $(lab)/lab.job)
+
+cleaninstall:
+	rm -rf $(foreach lab,$(labs),$(installdir)/$(lab) $(installdir)/$(lab).*.{stdout,stderr})
