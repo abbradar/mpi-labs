@@ -12,6 +12,6 @@
 
 mpdboot -r ssh -n $LOADL_TOTAL_TASKS -f $LOADL_HOSTFILE
 
-mpirun -r ssh -machinefile $LOADL_HOSTFILE -n $LOADL_TOTAL_TASKS $LOADL_JOB_NAME
+mpirun -r ssh -machinefile $LOADL_HOSTFILE -n $LOADL_TOTAL_TASKS ./$LOADL_JOB_NAME
 
 mpdallexit
