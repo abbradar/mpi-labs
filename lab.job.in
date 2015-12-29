@@ -4,7 +4,7 @@
 
 # @ job_name = @job_name@
 # @ job_type = MPICH
-# @ node = 8
+# @ node = @node@
 # @ initialdir = @initialdir@
 # @ output = $(initialdir)/$(job_name).$(jobid).stdout
 # @ error = $(initialdir)/$(job_name).$(jobid).stderr
