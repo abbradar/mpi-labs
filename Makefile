@@ -1,3 +1,5 @@
+MPICC ?= mpicc
+
 labs := lab1 lab2 lab3 lab4 lab5
 common_objs := utils.o
 
@@ -13,7 +15,7 @@ $(eval include $(1)/build.mk)
 $(eval $(1)_nodes ?= $(nodes))
 
 $(1)/$(1): $(foreach obj,$($(1)_objs),$(1)/$(obj)) $(common_objs)
-	mpicc $$^ -o $$@
+	$(MPICC) $$^ -o $$@
 
 # Sets installdir in the job file, among other things
 $(1)/$(1).job: lab.job.in
@@ -34,7 +36,7 @@ $(foreach lab, $(labs), \
 )
 
 %.o: %.c
-	mpicc -std=c99 -I $(rootdir) -c $< -o $@
+	$(MPICC) -std=c99 -I $(rootdir) -c $< -o $@
 
 clean:
 	find -name \*.o -delete
