@@ -43,4 +43,4 @@ clean:
 	rm -rf $(foreach lab,$(labs),$(lab)/$(lab) $(lab)/$(lab).job)
 
 cleaninstall:
-	rm -rf $(foreach lab,$(labs),$(installdir)/$(lab) $(installdir)/$(lab).*.{stdout,stderr})
+	rm -rf $(foreach lab,$(labs),$(installdir)/$(lab) $(installdir)/$(lab).*.{stdout,stderr} $(installdir)/$(lab).trace* $(installdir)/$(installdir)/$(lab).ttf)
