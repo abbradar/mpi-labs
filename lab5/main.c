@@ -15,7 +15,7 @@ int main(int argc, char** argv) {
 
   // Initialize TraceEvent
   MPI_Pcontrol(TRACENODE, 1024 * 1024, 1, 1);
-  MPI_Pcontrol(TRACESTATISTICS, 64, 1, 1, 1, 1, 1);
+  //MPI_Pcontrol(TRACESTATISTICS, 1, 1, 1, 1, 1, 1);
   MPI_Pcontrol(TRACEFILES, "lab5.trace.tmp", "lab5.trace", 1);
   MPI_Pcontrol(TRACELEVEL, 1, 1, 1);
 
