@@ -4,6 +4,7 @@
 
 # @ job_name = @job_name@
 # @ job_type = MPICH
+# @ class = small
 # @ node = @node@
 # @ initialdir = @initialdir@
 # @ output = $(initialdir)/$(job_name).$(jobid).stdout
