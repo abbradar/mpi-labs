@@ -15,10 +15,10 @@ int main(int argc, char** argv) {
 
   // Set trace parameters
   MPI_Pcontrol(TRACELEVEL, 1, 1, 1);
-  MPI_Pcontrol(TRACEFILES, "lab5.trace.tmp", "lab5.trace", 1);
+  MPI_Pcontrol(TRACEFILES, "lab5.trace.tmp", "lab5.trace", 0);
   MPI_Pcontrol(TRACESTATISTICS, 200, 1, 1, 1, 1, 1);
   // Start trace
-  MPI_Pcontrol(TRACENODE, 1024 * 1024, 1, 0);
+  MPI_Pcontrol(TRACENODE, 1024 * 1024, 1, 1);
 
   int nprocs;
   mpi_check(MPI_Comm_size(MPI_COMM_WORLD, &nprocs));
