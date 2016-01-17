@@ -13,11 +13,11 @@ int main(int argc, char** argv) {
   // Set a sane error handler (return errors and don't kill our process)
   mpi_check(MPI_Comm_set_errhandler(MPI_COMM_WORLD, MPI_ERRORS_RETURN));
 
+  MPI_Pcontrol(TRACELEVEL, 1, 1, 1);
+  MPI_Pcontrol(TRACEFILES, "lab5.trace.tmp", "lab5.trace", 1);
+  MPI_Pcontrol(TRACESTATISTICS, 200, 1, 1, 1, 1, 1);
   // Initialize TraceEvent
   MPI_Pcontrol(TRACENODE, 1024 * 1024, 1, 1);
-  //MPI_Pcontrol(TRACESTATISTICS, 1, 1, 1, 1, 1, 1);
-  MPI_Pcontrol(TRACEFILES, "lab5.trace.tmp", "lab5.trace", 1);
-  MPI_Pcontrol(TRACELEVEL, 1, 1, 1);
 
   int nprocs;
   mpi_check(MPI_Comm_size(MPI_COMM_WORLD, &nprocs));
@@ -71,10 +71,10 @@ int main(int argc, char** argv) {
 
   MPI_Pcontrol(TRACEEVENT, "gather", 2, 0, NULL);
   if (pid != 0) {
-    mpi_check(PMPI_Gatherv(recvbuf, recvlen, MPI_INT, NULL, NULL, NULL, MPI_DATATYPE_NULL, 0, MPI_COMM_WORLD));
+    mpi_check(MPI_Gatherv(recvbuf, recvlen, MPI_INT, NULL, NULL, NULL, MPI_DATATYPE_NULL, 0, MPI_COMM_WORLD));
   } else {
     int msg[INTS_SIZE];
-    mpi_check(PMPI_Gatherv(recvbuf, recvlen, MPI_INT, msg, recvcounts, displs, MPI_INT, 0, MPI_COMM_WORLD));
+    mpi_check(MPI_Gatherv(recvbuf, recvlen, MPI_INT, msg, recvcounts, displs, MPI_INT, 0, MPI_COMM_WORLD));
 
     printf("Result: ");
     for (int i = 0; i < INTS_SIZE; i++) {
