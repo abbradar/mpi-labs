@@ -13,7 +13,7 @@
 #include "utils.h"
 #endif
 
-#ifdef __GNUC__
+#ifndef offsetof
 #define offsetof(type, member)  __builtin_offsetof (type, member)
 #endif
 
