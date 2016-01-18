@@ -13,6 +13,10 @@
 #include "utils.h"
 #endif
 
+#ifdef __GNUC__
+#define offsetof(type, member)  __builtin_offsetof (type, member)
+#endif
+
 #define FLOAT_FMT "%8.2g"
 
 #define sqr(x) ({             \
@@ -281,9 +285,9 @@ int main(int argc, char** argv)
 
   MPI_Datatype mpi_border_type;
   {
-    const int blocklengths[] = { 1, 1, 1 };
-    const MPI_Datatype types[] = { MPI_UNSIGNED, MPI_DOUBLE, MPI_DOUBLE };
-    const MPI_Aint offsets[] = { offsetof(struct border, na), offsetof(struct border, a), offsetof(struct border, b) };
+    int blocklengths[] = { 1, 1, 1 };
+    MPI_Datatype types[] = { MPI_UNSIGNED, MPI_DOUBLE, MPI_DOUBLE };
+    MPI_Aint offsets[] = { offsetof(struct border, na), offsetof(struct border, a), offsetof(struct border, b) };
 
     mpi_check(MPI_Type_create_struct(sizeof(blocklengths) / sizeof(int), blocklengths, offsets, types, &mpi_border_type));
     mpi_check(MPI_Type_commit(&mpi_border_type));
