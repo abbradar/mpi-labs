@@ -1,5 +1,5 @@
 MPICC ?= mpicc
-CFLAGS = -Wall -g -std=c99 -fsanitize=address
+CFLAGS = -Wall -std=c99 -O -g -DOMPI -DOMP
 
 labs := lab1 lab2 lab3 lab4 lab5 task
 common_objs := utils.o
