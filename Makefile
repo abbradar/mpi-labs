@@ -1,6 +1,7 @@
 MPICC ?= mpicc
+CFLAGS = -Wall -g -std=c99 -fsanitize=address
 
-labs := lab1 lab2 lab3 lab4 lab5
+labs := lab1 lab2 lab3 lab4 lab5 task
 common_objs := utils.o
 
 rootdir ?= $(shell pwd)
@@ -15,7 +16,7 @@ $(eval include $(1)/build.mk)
 $(eval $(1)_nodes ?= $(nodes))
 
 $(1)/$(1): $(foreach obj,$($(1)_objs),$(1)/$(obj)) $(common_objs)
-	$(MPICC) $$^ -o $$@
+	$(MPICC) $(CFLAGS) $$^ -o $$@
 
 # Sets installdir in the job file, among other things
 $(1)/$(1).job: lab.job.in
@@ -36,7 +37,7 @@ $(foreach lab, $(labs), \
 )
 
 %.o: %.c
-	$(MPICC) -std=c99 -I $(rootdir) -c $< -o $@
+	$(MPICC) $(CFLAGS) -I $(rootdir) -c $< -o $@
 
 clean:
 	find -name \*.o -delete

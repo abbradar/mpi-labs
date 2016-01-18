@@ -10,4 +10,7 @@ in pkgs.clangStdenv.mkDerivation {
   buildInputs = with pkgs; [ openmpi ];
 
   nativeBuildInputs = with pkgs; [ pkgconfig cmake ];
+
+  OMPI_CC = "clang";
+  OMPI_CXX = "clang++";
 }
