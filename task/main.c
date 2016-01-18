@@ -146,6 +146,7 @@ struct tridiag* newdiag(size_t len)
 {
   assert(len > 0);
   struct tridiag* diag = malloc(sizeof(struct tridiag));
+  diag->len = len;
   diag->d = calloc(len, sizeof(double));
   diag->e = calloc(len - 1, sizeof(double));
   return diag;
@@ -230,7 +231,7 @@ struct poly* newpoly(size_t max_power)
   return poly;
 }
 
-struct poly* freepoly(struct poly* poly)
+void freepoly(struct poly* poly)
 {
   free(poly);
 }
@@ -266,7 +267,7 @@ void multopoly(struct poly* poly, double val)
 }
 
 #define addsubpolys(name, op) \
-  void name(const struct poly* acc, struct poly* from) \
+  void name(struct poly* acc, const struct poly* from) \
   {                                                    \
     size_t minp = min(from->power, acc->power);        \
     size_t maxp = max(from->power, acc->power);        \
@@ -285,16 +286,16 @@ void multopoly(struct poly* poly, double val)
 addsubpolys(addpolys, +)
 addsubpolys(subpolys, -)
 
-#undef addsubpolys(name, op)
+#undef addsubpolys
 
 void mulpolys(const struct poly* a, const struct poly* b, struct poly* res)
 {
   size_t new_power = a->power + b->power;
   assert(new_power < res->max_power);
   clearpoly(res);
-  for (size_t i = 0; i < from->power + 1; i++) {
-    for (size_t j = 0; j < acc->power + 1; j++) {
-      res->ks[i + j] = a[i] * b[j];
+  for (size_t i = 0; i < a->power + 1; i++) {
+    for (size_t j = 0; j < b->power + 1; j++) {
+      res->ks[i + j] = a->ks[i] * b->ks[j];
     }
   }
   res->power = new_power;
@@ -314,7 +315,7 @@ double polyval(const struct poly* poly, double val)
     addtopoly((to), 1, 1);           \
   }
 
-double diagcharpoly(const struct tridiag* diag, struct poly* poly)
+void diagcharpoly(const struct tridiag* diag, struct poly* poly)
 {
   assert(diag->len > 0);
   assert(poly->max_power >= diag->len + 1);
@@ -328,13 +329,13 @@ double diagcharpoly(const struct tridiag* diag, struct poly* poly)
     struct poly* tmp_p = newpoly(diag->len + 1);
     diagpoly(tmp_p, 1);
     mulpolys(prev_p, tmp_p, poly);
-    addtopoly(poly, 0, sqr(e[0]));
+    addtopoly(poly, 0, sqr(diag->e[0]));
 
     if (diag->len > 2) {
       struct poly* tmp2_p = newpoly(diag->len + 1);
 
       for (size_t i = 2; i < diag->len; i++) {
-        multopoly(prev_p, sqr(e[i - 1]));
+        multopoly(prev_p, sqr(diag->e[i - 1]));
         clearpoly(tmp_p);
         diagpoly(tmp_p, i);
         mulpolys(poly, tmp_p, tmp2_p);
@@ -352,28 +353,20 @@ double diagcharpoly(const struct tridiag* diag, struct poly* poly)
   freepoly(prev_p);
 }
 
-#undef diagpoly(to, n)
+#undef diagpoly
 
-double bisect(const struct tridiag* diag, const struct poly* poly, size_t na, double a, double b, double acc)
+double bisect(const struct tridiag* diag, size_t na, double a, double b, double acc)
 {
-  double pa = polyval(poly, a);
-  double pb = polyval(poly, b);
   double res;
 
   do {
     res = (a + b) / 2;
-    double pres = polyval(poly, res);
-    if (pa * pres < 0) {
+    if (sturmsigns(diag, res) == na) {
       b = res;
-      pb = pres;
-    } else if (pb * pres < 0) {
-      a = res;
-      pa = pres;
     } else {
-      if (sturmsigns(diag, res) == na) {
-      }
+      a = res;
     }
-  } while (abs(a - b) > acc);
+  } while (fabs(a - b) > acc);
 
   return res;
 }
@@ -390,22 +383,17 @@ void eigenvalues(const struct tridiag* diag, double a, double b, double acc, dou
   findborders(diag, a, 0, b, diag->len, borders, &borders_num);
   assert(borders_num == diag->len);
 
-  // Next, calculate characteristic polynom.
-  struct poly* poly = newpoly(diag->len + 1);
-  diagcharpoly(diag, poly);
-  
   // At last, actually bisect.
   for (size_t i = 0; i < diag->len; i++) {
-    values[i] = bisect(diag, poly, borders[i].na, borders[i].a, borders[i].b, acc);
+    values[i] = bisect(diag, borders[i].na, borders[i].a, borders[i].b, acc);
   }
 
-  freepoly(poly);
   free(borders);
 }
 
 int main()
 {
-  const int mtx_size = 4;
+  const int mtx_size = 20;
 
   // Generate a random real symmetric matrix.
   // srand(time(NULL));
@@ -441,6 +429,8 @@ int main()
     }
   }
   printf("\n");
+
+  free(values);
 
   return 0;
 }
