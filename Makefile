@@ -1,7 +1,7 @@
 MPICC ?= mpicc
-CFLAGS = -Wall -std=c99 -O -g -DOMPI -DOMP -fopenmp -fsanitize=address
+#CFLAGS = -Wall -std=c99 -O -g -DOMPI -DOMP -fopenmp -fsanitize=address
 #CFLAGS = -Wall -std=c99 -O -g -DOMPI -DOMP -fopenmp
-#CFLAGS = -Wall -std=c99 -O3 -pg -DOMPI -DOMP -DNDEBUG -fopenmp
+CFLAGS = -Wall -std=c99 -O3 -DOMPI -DOMP -DNDEBUG -fopenmp
 #CFLAGS = -Wall -std=c99 -O2 -pg -DOMP -DNDEBUG -fopenmp
 #CFLAGS = -Wall -std=c99 -O3 -DOMPI
 LDFLAGS = -lm
