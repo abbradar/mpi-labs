@@ -77,6 +77,10 @@ void mmultiply(struct matrix* a, struct matrix* b, struct matrix* out, int* disp
   assert(a->w == b->h);
   assert(out->w == b->w && out->h == a->h);
 
+#ifdef OMPI_PCONTROL
+  MPI_Pcontrol(TRACEEVENT, "Matrix multiply start", 2, 0, NULL);
+#endif
+
   int pid;
   mpi_check(MPI_Comm_rank(MPI_COMM_WORLD, &pid));
 
@@ -97,6 +101,10 @@ void mmultiply(struct matrix* a, struct matrix* b, struct matrix* out, int* disp
   }
 
   mpi_check(MPI_Gatherv(out->data, recvcounts[pid], MPI_DOUBLE, out->data, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD));
+
+#ifdef OMPI_PCONTROL
+  MPI_Pcontrol(TRACEEVENT, "Matrix multiply end", 2, 0, NULL);
+#endif
 }
 
 // Householder method
@@ -107,6 +115,10 @@ void tridiagonalize(struct matrix* mtx, int* displs, int* recvcounts, int* bdisp
 
   int pid;
   mpi_check(MPI_Comm_rank(MPI_COMM_WORLD, &pid));
+
+#ifdef OMPI_PCONTROL
+  MPI_Pcontrol(TRACEEVENT, "Trigiagonalization start", 1, 0, NULL);
+#endif
 
   if (mtx->w > 0 && mtx->h > 0) {
     struct matrix* u = alloc_check(newmatrix(1, mtx->h));
@@ -175,6 +187,10 @@ void tridiagonalize(struct matrix* mtx, int* displs, int* recvcounts, int* bdisp
     freematrix(u);
     freematrix(p);
   }
+
+#ifdef OMPI_PCONTROL
+  MPI_Pcontrol(TRACEEVENT, "Trigiagonalization end", 1, 0, NULL);
+#endif
 }
 
 struct tridiag {
@@ -375,7 +391,7 @@ int main(int argc, char** argv)
   struct tridiag* diag = alloc_check(newdiag(mtx_size));
 
 #ifdef OMPI_PCONTROL
-
+  MPI_Pcontrol(TRACEEVENT, "Overall start", 0, 0, NULL);
 #endif
 
   double* values = alloc_check(calloc(mtx_size, sizeof(double)));
@@ -443,6 +459,10 @@ int main(int argc, char** argv)
       }
     }
   }
+
+#ifdef OMPI_PCONTROL
+  MPI_Pcontrol(TRACEEVENT, "Overall end", 0, 0, NULL);
+#endif
 
 #ifdef OMPI
   if (pid == 0) {
