@@ -224,23 +224,29 @@ unsigned sturmsigns(const struct tridiag* diag, double c)
 struct border {
   unsigned na;
   double a;
+  unsigned nb;
   double b;
 };
 
-void findborders(const struct tridiag* diag, double a, unsigned na, double b, unsigned nb, struct border* borders, unsigned* borders_num)
+void findborders(const struct tridiag* diag, double a, unsigned na, double b, unsigned nb, unsigned nmax, MPI_Datatype type)
 {
   assert(b >= a);
   assert(nb >= na);
-  if (nb - na == 1) {
-    borders[*borders_num].na = na;
-    borders[*borders_num].a = a;
-    borders[*borders_num].b = b;
-    (*borders_num)++;
-  } else if (nb - na > 1) {
+  if (nb - na != 0 && nb - na <= nmax) {
+    struct border border;
+    border.na = na;
+    border.a = a;
+    border.nb = nb;
+    border.b = b;
+
+    MPI_Status stat;
+    mpi_check(MPI_Recv(NULL, 0, type, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &stat));
+    mpi_check(MPI_Send(&border, 1, type, stat.MPI_SOURCE, 0, MPI_COMM_WORLD));
+  } else if (nb - na > nmax) {
     double c = (a + b) / 2;
     unsigned nc = sturmsigns(diag, c);
-    findborders(diag, a, na, c, nc, borders, borders_num);
-    findborders(diag, c, nc, b, nb, borders, borders_num);
+    findborders(diag, a, na, c, nc, nmax, type);
+    findborders(diag, c, nc, b, nb, nmax, type);
   }
 }
 
@@ -260,24 +266,37 @@ double bisect(const struct tridiag* diag, unsigned na, double a, double b, doubl
   return res;
 }
 
-void eigenvalues_borders(const struct tridiag* diag, double a, double b, struct border* borders)
+void multibisect(const struct tridiag* diag, struct border border, double acc, double* values, unsigned* nvalues)
+{
+  if (border.nb - border.na == 1) {
+    values[*nvalues] = bisect(diag, border.na, border.a, border.b, acc);
+    ++*nvalues;
+  } else if (border.nb - border.na != 0) {
+    double c = (border.a + border.b) / 2;
+    unsigned nc = sturmsigns(diag, c);
+    struct border b1 = { border.na, border.a, nc, c };
+    multibisect(diag, b1, acc, values, nvalues);
+    struct border b2 = { nc, c, border.nb, border.b };
+    multibisect(diag, b2, acc, values, nvalues);
+  }
+}
+
+void eigenvalues_borders(const struct tridiag* diag, double a, double b, unsigned nmax, MPI_Datatype type)
 {
     // First, find real eigenvalues' borders.
     while (sturmsigns(diag, a) > 0) a -= fabs(a) + 0.1;
     while (sturmsigns(diag, b) != diag->len) b += fabs(b) + 0.1;
-    unsigned borders_num = 0;
-    findborders(diag, a, 0, b, diag->len, borders, &borders_num);
-    assert(borders_num == diag->len);
+    findborders(diag, a, 0, b, diag->len, nmax, type);
 }
 
 int main(int argc, char** argv)
 {
-  const int mtx_size = 20;
+  const int mtx_size = 1600;
   const double range_from = -1;
   const double range_to = 1;
   const double precision = 0.0001;
+  const double chunksize = 200;
 
-#ifdef OMPI
   mpi_check(MPI_Init(&argc, &argv));
   // Set a sane error handler (return errors and don't kill our process)
   mpi_check(MPI_Comm_set_errhandler(MPI_COMM_WORLD, MPI_ERRORS_RETURN));
@@ -300,9 +319,9 @@ int main(int argc, char** argv)
 
   MPI_Datatype mpi_border_type;
   {
-    int blocklengths[] = { 1, 1, 1 };
-    MPI_Datatype types[] = { MPI_UNSIGNED, MPI_DOUBLE, MPI_DOUBLE };
-    MPI_Aint offsets[] = { offsetof(struct border, na), offsetof(struct border, a), offsetof(struct border, b) };
+    int blocklengths[] = { 1, 1, 1, 1 };
+    MPI_Datatype types[] = { MPI_UNSIGNED, MPI_DOUBLE, MPI_UNSIGNED, MPI_DOUBLE };
+    MPI_Aint offsets[] = { offsetof(struct border, na), offsetof(struct border, a), offsetof(struct border, nb), offsetof(struct border, b) };
 
     mpi_check(MPI_Type_create_struct(sizeof(blocklengths) / sizeof(int), blocklengths, offsets, types, &mpi_border_type));
     mpi_check(MPI_Type_commit(&mpi_border_type));
@@ -312,21 +331,6 @@ int main(int argc, char** argv)
   mpi_check(MPI_Comm_rank(MPI_COMM_WORLD, &pid));
   int nprocs;
   mpi_check(MPI_Comm_size(MPI_COMM_WORLD, &nprocs));
-
-  int* displs = NULL;
-  if (pid == 0) {
-    displs = alloc_check(calloc(nprocs, sizeof(int)));
-  }
-
-  int* recvcounts = alloc_check(calloc(nprocs, sizeof(int)));
-  mpi_check(UMPI_Scatterv_lens(mtx_size, recvcounts, displs, 0, MPI_COMM_WORLD));
-  int recvlen = recvcounts[pid];
-  if (pid != 0) {
-    free(recvcounts);
-  }
-
-  struct border* borders = alloc_check(calloc(recvlen, sizeof(struct border)));
-#endif
   
   struct tridiag* diag = alloc_check(newdiag(mtx_size));
 
@@ -334,9 +338,9 @@ int main(int argc, char** argv)
 
 #endif
 
-#ifdef OMPI
+  double* values = alloc_check(calloc(mtx_size, sizeof(double)));
+  
   if (pid == 0) {
-#endif
     // Generate a random real symmetric matrix.
     // srand(time(NULL));
     srand(0);
@@ -354,62 +358,47 @@ int main(int argc, char** argv)
     todiagonals(mtx, diag);
     freematrix(mtx);
 
-#ifdef OMPI
-    struct border* new_borders = alloc_check(calloc(diag->len, sizeof(struct border)));
-
-    // Find eigenvalues.
-    eigenvalues_borders(diag, range_from, range_to, new_borders);
-
     // Send tridiagonal matrix.
     mpi_check(MPI_Bcast(diag->d, diag->len, MPI_DOUBLE, 0, MPI_COMM_WORLD));
     mpi_check(MPI_Bcast(diag->e, diag->len - 1, MPI_DOUBLE, 0, MPI_COMM_WORLD));
-
-    // At last, actually bisect.
-    mpi_check(MPI_Scatterv(new_borders, recvcounts, displs, mpi_border_type, borders, recvlen, mpi_border_type, 0, MPI_COMM_WORLD));
-    free(new_borders);
   } else {
-    // Send tridiagonal matrix.
+    // Receive tridiagonal matrix.
     mpi_check(MPI_Bcast(diag->d, diag->len, MPI_DOUBLE, 0, MPI_COMM_WORLD));
     mpi_check(MPI_Bcast(diag->e, diag->len - 1, MPI_DOUBLE, 0, MPI_COMM_WORLD));
-
-    mpi_check(MPI_Scatterv(NULL, NULL, NULL, MPI_DATATYPE_NULL, borders, recvlen, mpi_border_type, 0, MPI_COMM_WORLD));
   }
-#else
-  // Find eigenvalues.
-  eigenvalues_borders(diag, range_from, range_to, borders);
-#endif
 
-  double* values = NULL;
-
-#ifdef OMPI
   if (pid == 0) {
-#endif
-    values = alloc_check(calloc(sizeof(double), mtx_size));
-#ifdef OMPI
-  }
-#endif
-  
-#ifdef OMPI
-  double* sendbuf = alloc_check(calloc(recvlen, sizeof(double)));
-  for (unsigned i = 0; i < recvlen; i++) {
-    printf("pid: %i, na: %i, a: %lf, b: %lf\n", pid, borders[i].na, borders[i].a, borders[i].b);
-    sendbuf[i] = bisect(diag, borders[i].na, borders[i].a, borders[i].b, precision);
-  }
+    eigenvalues_borders(diag, range_from, range_to, chunksize, mpi_border_type);
 
-  if (pid != 0) {
-    mpi_check(MPI_Gatherv(sendbuf, recvlen, MPI_DOUBLE, NULL, NULL, NULL, MPI_DATATYPE_NULL, 0, MPI_COMM_WORLD));
+    int n;
+    for (unsigned i = 0; i < mtx_size; i += n) {
+      MPI_Status stat;
+      mpi_check(MPI_Recv(NULL, 0, mpi_border_type, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &stat));
+      mpi_check(MPI_Send(NULL, 0, mpi_border_type, stat.MPI_SOURCE, 0, MPI_COMM_WORLD));
+      mpi_check(MPI_Probe(stat.MPI_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &stat));
+      mpi_check(MPI_Get_count(&stat, MPI_DOUBLE, &n));
+      mpi_check(MPI_Recv(values + i, n, MPI_DOUBLE, stat.MPI_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, NULL));
+    }
   } else {
-    mpi_check(MPI_Gatherv(sendbuf, recvlen, MPI_DOUBLE, values, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD));
+    unsigned i = 0;
+    while (1) {
+      MPI_Status stat;
+      int n;
+      mpi_check(MPI_Send(NULL, 0, mpi_border_type, 0, 0, MPI_COMM_WORLD));
+      mpi_check(MPI_Probe(0, MPI_ANY_TAG, MPI_COMM_WORLD, &stat));
+      mpi_check(MPI_Get_count(&stat, mpi_border_type, &n));
+      if (n == 0) {
+        mpi_check(MPI_Recv(NULL, 0, mpi_border_type, 0, 0, MPI_COMM_WORLD, NULL));
+        mpi_check(MPI_Send(values, i, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD));
+        break;
+      } else {
+        struct border border;
+        assert(n == 1);
+        mpi_check(MPI_Recv(&border, 1, mpi_border_type, 0, 0, MPI_COMM_WORLD, NULL));
+        multibisect(diag, border, precision, values, &i);
+      }
+    }
   }
-  free(sendbuf);
-#else
-  for (unsigned i = 0; i < mtx_size; i++) {
-    values[i] = bisect(diag, borders[i].na, borders[i].a, borders[i].b, precision);
-  }
-#endif
-
-  free(borders);
-  freediag(diag);
 
 #ifdef OMPI
   if (pid == 0) {
@@ -422,17 +411,14 @@ int main(int argc, char** argv)
    
     printf("\n");
     }
-    free(values);
 #ifdef OMPI
   }
 #endif
 
-#ifdef OMPI
-  if (pid == 0) {
-    free(recvcounts);
-    free(displs);
-  }
+  free(values);
+  freediag(diag);
 
+#ifdef OMPI
   mpi_check(MPI_Finalize());
 #endif
 
