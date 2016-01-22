@@ -5,12 +5,10 @@
 #include <assert.h>
 #include <time.h>
 
-#ifdef OMPI
 #ifdef OMPI_PCONTROL
 #include <pcontrol.h>
 #endif
 #include <mpi.h>
-#endif
 
 #include "utils.h"
 
@@ -74,14 +72,21 @@ void mfprint(FILE* file, const struct matrix* mtx)
   fprintf(file, "\n");
 }
 
-void mmultiply(const struct matrix* a, const struct matrix* b, struct matrix* out)
+void mmultiply(struct matrix* a, struct matrix* b, struct matrix* out, int* displs, int* recvcounts, int* bdispls, int* brecvcounts)
 {
   assert(a->w == b->h);
   assert(out->w == b->w && out->h == a->h);
+
+  int pid;
+  mpi_check(MPI_Comm_rank(MPI_COMM_WORLD, &pid));
+
+  mpi_check(MPI_Bcast(b->data, b->w * b->h, MPI_DOUBLE, 0, MPI_COMM_WORLD));
+  mpi_check(MPI_Scatterv(a->data, brecvcounts, bdispls, MPI_DOUBLE, a->data, brecvcounts[pid], MPI_DOUBLE, 0, MPI_COMM_WORLD));
+
+  for (unsigned y = 0; y < recvcounts[pid]; y++) {
 #ifdef OMP
-  #pragma omp for
+    #pragma omp parallel for
 #endif
-  for (unsigned y = 0; y < out->h; y++) {
     for (unsigned x = 0; x < out->w; x++) {
       double r = 0;
       for (unsigned i = 0; i < a->w; i++) {
@@ -90,63 +95,80 @@ void mmultiply(const struct matrix* a, const struct matrix* b, struct matrix* ou
       val(out, x, y) = r;
     }
   }
+
+  mpi_check(MPI_Gatherv(out->data, recvcounts[pid], MPI_DOUBLE, out->data, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD));
 }
 
 // Householder method
 // http://www.aip.de/groups/soe/local/numres/bookcpdf/c11-2.pdf
-void tridiagonalize(struct matrix* mtx)
+void tridiagonalize(struct matrix* mtx, int* displs, int* recvcounts, int* bdispls, int* brecvcounts)
 {
   assert(mtx->w == mtx->h);
-#ifdef OMP
-  #pragma omp parallel
-#endif
+
+  int pid;
+  mpi_check(MPI_Comm_rank(MPI_COMM_WORLD, &pid));
+
   if (mtx->w > 0 && mtx->h > 0) {
     struct matrix* u = alloc_check(newmatrix(1, mtx->h));
     struct matrix* p = alloc_check(newmatrix(1, mtx->h));
 
     for (unsigned i = 1; i < mtx->w - 1; i++) {
       unsigned cx = i - 1;
-
-      double mx = 0;
-      for (unsigned y = i; y < mtx->h; y++) {
-        mx += sqr(val(mtx, cx, y));
-      }
-      mx = sqrt(mx);
-
-      for (unsigned y = 0; y < i; y++) {
-        val(u, 0, y) = 0;
-      }
-      for (unsigned y = i; y < mtx->h; y++) {
-        val(u, 0, y) = val(mtx, cx, y);
-      }
-      val(u, 0, i) -= mx;
-
       double mu2 = 0;
-      for (unsigned y = 0; y < mtx->h; y++) {
-        mu2 += sqr(val(u, 0, y));
-      }
-
-      mmultiply(mtx, u, p);
-      for (unsigned y = 0; y < mtx->h; y++) {
-        val(p, 0, y) /= mu2 / 2;
-      }
-
+      double mx = 0;
       double k = 0;
-      for (unsigned j = 0; j < mtx->h; j++) {
-        k += val(u, 0, j) * val(p, 0, j) / mu2;
-      }
 
-      for (unsigned y = 0; y < mtx->h; y++) {
-        val(p, 0, y) -= k * val(u, 0, y);
+      if (pid == 0) {
+        for (unsigned y = i; y < mtx->h; y++) {
+          mx += sqr(val(mtx, cx, y));
+        }
+        mx = sqrt(mx);
+        
+        for (unsigned y = 0; y < i; y++) {
+          val(u, 0, y) = 0;
+        }
+        for (unsigned y = i; y < mtx->h; y++) {
+          val(u, 0, y) = val(mtx, cx, y);
+        }
+        val(u, 0, i) -= mx;
+        
+        for (unsigned y = 0; y < mtx->h; y++) {
+          mu2 += sqr(val(u, 0, y));
+        }
       }
+        
+      mmultiply(mtx, u, p, displs, recvcounts, bdispls, brecvcounts);
 
 #ifdef OMP
-      #pragma omp for
+      #pragma omp parallel
 #endif
-      for (unsigned y = cx; y < mtx->h; y++) {
-        for (unsigned x = cx; x <= y; x++) {
-          val(mtx, x, y) -= val(p, 0, y) * val(u, 0, x) + val(u, 0, y) * val(p, 0, x);
-          val(mtx, y, x) = val(mtx, x, y);
+      if (pid == 0) {
+#ifdef OMP
+        #pragma omp for
+#endif
+        for (unsigned y = 0; y < mtx->h; y++) {
+          val(p, 0, y) /= mu2 / 2;
+        }
+        
+        for (unsigned j = 0; j < mtx->h; j++) {
+          k += val(u, 0, j) * val(p, 0, j) / mu2;
+        }
+        
+#ifdef OMP
+        #pragma omp for
+#endif
+        for (unsigned y = 0; y < mtx->h; y++) {
+          val(p, 0, y) -= k * val(u, 0, y);
+        }
+
+#ifdef OMP
+        #pragma omp for
+#endif
+        for (unsigned y = cx; y < mtx->h; y++) {
+          for (unsigned x = cx; x <= y; x++) {
+            val(mtx, x, y) -= val(p, 0, y) * val(u, 0, x) + val(u, 0, y) * val(p, 0, x);
+            val(mtx, y, x) = val(mtx, x, y);
+          }
         }
       }
     }
@@ -332,6 +354,24 @@ int main(int argc, char** argv)
   int nprocs;
   mpi_check(MPI_Comm_size(MPI_COMM_WORLD, &nprocs));
   
+  int* displs = NULL;
+  int* bdispls = NULL;
+  if (pid == 0) {
+    displs = alloc_check(calloc(nprocs, sizeof(int)));
+    bdispls = alloc_check(calloc(nprocs, sizeof(int)));
+  }
+
+  int* recvcounts = alloc_check(calloc(nprocs, sizeof(int)));
+  int* brecvcounts = alloc_check(calloc(nprocs, sizeof(int)));
+  mpi_check(UMPI_Scatterv_lens(mtx_size, recvcounts, displs, 0, MPI_COMM_WORLD));
+
+  for (int i = 0; i < nprocs; i++) {
+    if (pid == 0) {
+      bdispls[i] = displs[i] * mtx_size;
+    }
+    brecvcounts[i] = recvcounts[i] * mtx_size;
+  }
+  
   struct tridiag* diag = alloc_check(newdiag(mtx_size));
 
 #ifdef OMPI_PCONTROL
@@ -340,20 +380,23 @@ int main(int argc, char** argv)
 
   double* values = alloc_check(calloc(mtx_size, sizeof(double)));
   
+  struct matrix* mtx = alloc_check(newmatrix(mtx_size, mtx_size));
   if (pid == 0) {
     // Generate a random real symmetric matrix.
     // srand(time(NULL));
     srand(0);
-    struct matrix* mtx = alloc_check(newmatrix(mtx_size, mtx_size));
     for (unsigned y = 0; y < mtx->h; y++) {
       for (unsigned x = 0; x <= y; x++) {
         val(mtx, x, y) = (double)rand() / (RAND_MAX / 2) - 1;
         val(mtx, y, x) = val(mtx, y, x);
       }
     }
+  }
 
-    // Make a tridiagonal out of it.
-    tridiagonalize(mtx);
+  // Make a tridiagonal out of it.
+  tridiagonalize(mtx, displs, recvcounts, bdispls, brecvcounts);
+
+  if (pid == 0) {
     // mfprint(stdout, mtx);
     todiagonals(mtx, diag);
     freematrix(mtx);
@@ -362,6 +405,7 @@ int main(int argc, char** argv)
     mpi_check(MPI_Bcast(diag->d, diag->len, MPI_DOUBLE, 0, MPI_COMM_WORLD));
     mpi_check(MPI_Bcast(diag->e, diag->len - 1, MPI_DOUBLE, 0, MPI_COMM_WORLD));
   } else {
+    freematrix(mtx);
     // Receive tridiagonal matrix.
     mpi_check(MPI_Bcast(diag->d, diag->len, MPI_DOUBLE, 0, MPI_COMM_WORLD));
     mpi_check(MPI_Bcast(diag->e, diag->len - 1, MPI_DOUBLE, 0, MPI_COMM_WORLD));
@@ -419,6 +463,12 @@ int main(int argc, char** argv)
   freediag(diag);
 
 #ifdef OMPI
+  if (pid == 0) {
+    free(displs);
+    free(bdispls);
+  }
+  free(recvcounts);
+  free(brecvcounts);
   mpi_check(MPI_Finalize());
 #endif
 
