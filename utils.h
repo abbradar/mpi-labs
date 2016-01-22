@@ -17,6 +17,12 @@ void __mpi_check(int res, const char* file, const int line);
 
 #define divup(a, b) ((a) / (b)) + ((a) % (b) == 0 ? 0 : 1)
 
+#define alloc_check(res) ({                       \
+      __typeof__(res) ptr = (res);               \
+      err_check(ptr != NULL, "Allocation error"); \
+      ptr;                                        \
+    })
+
 // If current rank is not root, only recvcounts[pid] is guaranteed to be correct.
 int UMPI_Scatterv_lens(int count, int* recvcounts, int* displs, int root, MPI_Comm comm);
 

@@ -10,11 +10,12 @@
 #include <pcontrol.h>
 #endif
 #include <mpi.h>
-#include "utils.h"
 #endif
 
+#include "utils.h"
+
 #ifndef offsetof
-#define offsetof(type, member)  __builtin_offsetof (type, member)
+#define offsetof(type, member)  __builtin_offsetof(type, member)
 #endif
 
 #define FLOAT_FMT "%8.2g"
@@ -45,8 +46,10 @@ struct matrix {
 struct matrix* newmatrix(unsigned w, unsigned h)
 {
   struct matrix* mtx = calloc(1, sizeof(struct matrix) + w * h * sizeof(double));
-  mtx->w = w;
-  mtx->h = h;
+  if (mtx != NULL) {
+    mtx->w = w;
+    mtx->h = h;
+  }
   return mtx;
 }
 
@@ -94,10 +97,12 @@ void mmultiply(const struct matrix* a, const struct matrix* b, struct matrix* ou
 void tridiagonalize(struct matrix* mtx)
 {
   assert(mtx->w == mtx->h);
+#ifdef OMP
   #pragma omp parallel
+#endif
   if (mtx->w > 0 && mtx->h > 0) {
-    struct matrix* u = newmatrix(1, mtx->h);
-    struct matrix* p = newmatrix(1, mtx->h);
+    struct matrix* u = alloc_check(newmatrix(1, mtx->h));
+    struct matrix* p = alloc_check(newmatrix(1, mtx->h));
 
     for (unsigned i = 1; i < mtx->w - 1; i++) {
       unsigned cx = i - 1;
@@ -141,11 +146,7 @@ void tridiagonalize(struct matrix* mtx)
       for (unsigned y = cx; y < mtx->h; y++) {
         for (unsigned x = cx; x <= y; x++) {
           val(mtx, x, y) -= val(p, 0, y) * val(u, 0, x) + val(u, 0, y) * val(p, 0, x);
-        }
-      }
-      for (unsigned y = cx; y < mtx->h - 1; y++) {
-        for (unsigned x = y + 1; x < mtx->w; x++) {
-          val(mtx, x, y) = val(mtx, y, x);
+          val(mtx, y, x) = val(mtx, x, y);
         }
       }
     }
@@ -164,9 +165,17 @@ struct tridiag* newdiag(unsigned len)
 {
   assert(len > 0);
   struct tridiag* diag = malloc(sizeof(struct tridiag));
+  double* d = calloc(len, sizeof(double));
+  double* e = calloc(len - 1, sizeof(double));
+  if (diag == NULL || d == NULL || e == NULL) {
+    if (diag != NULL) free(diag);
+    if (d != NULL) free(d);
+    if (e != NULL) free(e);
+    return NULL;
+  }
   diag->len = len;
-  diag->d = calloc(len, sizeof(double));
-  diag->e = calloc(len - 1, sizeof(double));
+  diag->d = d;
+  diag->e = e;
   return diag;
 }
 
@@ -268,7 +277,6 @@ int main(int argc, char** argv)
   const double range_to = 1;
   const double precision = 0.0001;
 
-  struct tridiag* diag = newdiag(mtx_size);
 #ifdef OMPI
   mpi_check(MPI_Init(&argc, &argv));
   // Set a sane error handler (return errors and don't kill our process)
@@ -277,7 +285,14 @@ int main(int argc, char** argv)
 #ifdef OMPI_PCONTROL
   // Set trace parameters
   MPI_Pcontrol(TRACELEVEL, 1, 1, 1);
-  MPI_Pcontrol(TRACEFILES, "task.trace.tmp", "task.trace", 0);
+  {
+    char tmpname[255] = "task.trace.tmp";
+    char* name = getenv("LOADL_STEP_ID");
+    if (name) {
+      snprintf(tmpname, sizeof(tmpname) - 1, "task.trace.tmp.%s", name);
+    }
+    MPI_Pcontrol(TRACEFILES, tmpname, "task.trace", 0);
+  }
   MPI_Pcontrol(TRACESTATISTICS, 200, 1, 1, 1, 1, 1);
   // Start trace
   MPI_Pcontrol(TRACENODE, 1024 * 1024, 1, 1);
@@ -297,31 +312,39 @@ int main(int argc, char** argv)
   mpi_check(MPI_Comm_rank(MPI_COMM_WORLD, &pid));
   int nprocs;
   mpi_check(MPI_Comm_size(MPI_COMM_WORLD, &nprocs));
+
   int* displs = NULL;
   if (pid == 0) {
-    displs = calloc(nprocs, sizeof(int));
+    displs = alloc_check(calloc(nprocs, sizeof(int)));
   }
-  int* recvcounts = calloc(nprocs, sizeof(int));
 
+  int* recvcounts = alloc_check(calloc(nprocs, sizeof(int)));
   mpi_check(UMPI_Scatterv_lens(mtx_size, recvcounts, displs, 0, MPI_COMM_WORLD));
   int recvlen = recvcounts[pid];
+  if (pid != 0) {
+    free(recvcounts);
+  }
 
-  struct border* recvbuf = calloc(recvlen, sizeof(struct border));
+  struct border* borders = alloc_check(calloc(recvlen, sizeof(struct border)));
+#endif
+  
+  struct tridiag* diag = alloc_check(newdiag(mtx_size));
 
+#ifdef OMPI_PCONTROL
+
+#endif
+
+#ifdef OMPI
   if (pid == 0) {
 #endif
     // Generate a random real symmetric matrix.
     // srand(time(NULL));
     srand(0);
-    struct matrix* mtx = newmatrix(mtx_size, mtx_size);
+    struct matrix* mtx = alloc_check(newmatrix(mtx_size, mtx_size));
     for (unsigned y = 0; y < mtx->h; y++) {
       for (unsigned x = 0; x <= y; x++) {
         val(mtx, x, y) = (double)rand() / (RAND_MAX / 2) - 1;
-      }
-    }
-    for (unsigned y = 0; y < mtx->h - 1; y++) {
-      for (unsigned x = y + 1; x < mtx->w; x++) {
-        val(mtx, x, y) = val(mtx, y, x);
+        val(mtx, y, x) = val(mtx, y, x);
       }
     }
 
@@ -331,71 +354,86 @@ int main(int argc, char** argv)
     todiagonals(mtx, diag);
     freematrix(mtx);
 
-    // Find eigenvalues.
-    struct border* borders = calloc(diag->len, sizeof(struct border));
-    eigenvalues_borders(diag, range_from, range_to, borders);
-
 #ifdef OMPI
+    struct border* new_borders = alloc_check(calloc(diag->len, sizeof(struct border)));
+
+    // Find eigenvalues.
+    eigenvalues_borders(diag, range_from, range_to, new_borders);
+
     // Send tridiagonal matrix.
     mpi_check(MPI_Bcast(diag->d, diag->len, MPI_DOUBLE, 0, MPI_COMM_WORLD));
     mpi_check(MPI_Bcast(diag->e, diag->len - 1, MPI_DOUBLE, 0, MPI_COMM_WORLD));
 
     // At last, actually bisect.
-    mpi_check(MPI_Scatterv(borders, recvcounts, displs, mpi_border_type, recvbuf, recvlen, mpi_border_type, 0, MPI_COMM_WORLD));
-    free(borders);
+    mpi_check(MPI_Scatterv(new_borders, recvcounts, displs, mpi_border_type, borders, recvlen, mpi_border_type, 0, MPI_COMM_WORLD));
+    free(new_borders);
   } else {
     // Send tridiagonal matrix.
     mpi_check(MPI_Bcast(diag->d, diag->len, MPI_DOUBLE, 0, MPI_COMM_WORLD));
     mpi_check(MPI_Bcast(diag->e, diag->len - 1, MPI_DOUBLE, 0, MPI_COMM_WORLD));
 
-    mpi_check(MPI_Scatterv(NULL, NULL, NULL, MPI_DATATYPE_NULL, recvbuf, recvlen, mpi_border_type, 0, MPI_COMM_WORLD));
+    mpi_check(MPI_Scatterv(NULL, NULL, NULL, MPI_DATATYPE_NULL, borders, recvlen, mpi_border_type, 0, MPI_COMM_WORLD));
   }
+#else
+  // Find eigenvalues.
+  eigenvalues_borders(diag, range_from, range_to, borders);
+#endif
 
-  double* sendbuf = calloc(recvlen, sizeof(double));
+  double* values = NULL;
+
+#ifdef OMPI
+  if (pid == 0) {
+#endif
+    values = alloc_check(calloc(sizeof(double), mtx_size));
+#ifdef OMPI
+  }
+#endif
+  
+#ifdef OMPI
+  double* sendbuf = alloc_check(calloc(recvlen, sizeof(double)));
   for (unsigned i = 0; i < recvlen; i++) {
-    printf("pid: %i, na: %i, a: %lf, b: %lf\n", pid, recvbuf[i].na, recvbuf[i].a, recvbuf[i].b);
-    sendbuf[i] = bisect(diag, recvbuf[i].na, recvbuf[i].a, recvbuf[i].b, precision);
+    printf("pid: %i, na: %i, a: %lf, b: %lf\n", pid, borders[i].na, borders[i].a, borders[i].b);
+    sendbuf[i] = bisect(diag, borders[i].na, borders[i].a, borders[i].b, precision);
   }
 
   if (pid != 0) {
     mpi_check(MPI_Gatherv(sendbuf, recvlen, MPI_DOUBLE, NULL, NULL, NULL, MPI_DATATYPE_NULL, 0, MPI_COMM_WORLD));
   } else {
-#endif
-    double* values = calloc(sizeof(double), mtx_size);
-#ifdef OMPI
     mpi_check(MPI_Gatherv(sendbuf, recvlen, MPI_DOUBLE, values, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD));
+  }
+  free(sendbuf);
 #else
-    for (unsigned i = 0; i < mtx_size; i++) {
-      values[i] = bisect(diag, borders[i].na, borders[i].a, borders[i].b, precision);
-    }
+  for (unsigned i = 0; i < mtx_size; i++) {
+    values[i] = bisect(diag, borders[i].na, borders[i].a, borders[i].b, precision);
+  }
 #endif
 
+  free(borders);
+  freediag(diag);
+
+#ifdef OMPI
+  if (pid == 0) {
+#endif
     if (mtx_size > 0) {
       printf(FLOAT_FMT, values[0]);
       for (unsigned i = 1; i < mtx_size; i++) {
         printf(" " FLOAT_FMT, values[i]);
       }
-    }
+   
     printf("\n");
-
+    }
     free(values);
 #ifdef OMPI
   }
 #endif
 
-  freediag(diag);
-
 #ifdef OMPI
-  free(sendbuf);
-
-  free(recvcounts);
   if (pid == 0) {
+    free(recvcounts);
     free(displs);
   }
 
   mpi_check(MPI_Finalize());
-#else
-  free(borders);
 #endif
 
   return 0;
